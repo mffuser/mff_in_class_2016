@@ -193,7 +193,8 @@ plot(retVals.^2)
 nSim = 6000;
 sigma0 = 0.5;
 
-[simVals, simSigmas] = GARCHsim([0.1, 0.15, 0.84], nSim, sigma0);
+trueParams = [0.1, 0.15, 0.84];
+[simVals, simSigmas] = GARCHsim(trueParams, nSim, sigma0);
 
 
 figure('Position', [50 50 1200 600])
@@ -207,7 +208,7 @@ plot(simSigmas)
 
 % assume just some parameters
 paramsHat = [0.4, 0.1, 0.1];
-%paramsHat = [0.1, 0.15, 0.84];
+paramsHat = [0.1, 0.15, 0.84];
 kappa = paramsHat(1);
 alpha = paramsHat(2);
 beta = paramsHat(3);
@@ -220,17 +221,83 @@ for ii=2:size(simVals, 1)
     derivedSigmas(ii) = sqrt(kappa + alpha*simVals(ii-1)^2 + beta*derivedSigmas(ii-1)^2);
 end
 
+epsilonsHat = simVals ./ derivedSigmas;
+
+llh = sum(log(normpdf(epsilonsHat, 0, 1)))
+
 %%
 
+figure('Position', [50 50 1200 600])
+subplot(1, 2, 1)
 plot(simSigmas, '-b')
 hold on;
 plot(derivedSigmas, '-r')
 
+subplot(1, 2, 2)
+plot(epsilonsHat)
+
+%% estimate GARCH
+
+
+nhhlGARCH = @(params)-sum(log(normpdf(simVals, 0, deriveSigmas(simVals, params, 0.5))));
+nhhlGARCH = @(params)-sum(log(normpdf(simVals./ deriveSigmas(simVals, params, 0.5), 0, 1)));
+
+paramsHat = fmincon(nhhlGARCH, [0.1, 0.1, 0.89], [0, 1, 1], ...
+    1, [], [], [0.01 0.01 0.01], [0.11 0.99 0.99]);
+
+
+derivedSigmas = deriveSigmas(simVals, trueParams, 1.5);
+plot(derivedSigmas)
+
+plot(sqrt(infer(trueGARCH, simVals)))
+hold on
+plot(simSigmas, '-r')
+plot(derivedSigmas, '-g')
+
+
+%% same exercise with built-in function
+
+% create model
+trueGARCH = garch('Constant', trueParams(1), 'GARCH', trueParams(3),...
+    'ARCH', trueParams(2));
+
+[simVals2, simSigmas2] = simulate(trueGARCH, 6000);
+
+%% get likelihood with correctly estimated parameters
+
+ToEstMdl = garch(1,1);
+[EstMdl,EstParamCov,logL,info] = estimate(ToEstMdl, simVals);
+
+xxEps = simVals./sqrt(infer(EstMdl, simVals));
+
+normlike([0, 1], xxEps)
+sum(log(normpdf(xxEps, 0 , 1)))
+sum(log(normpdf(simVals, 0 , derivedSigmas)))
+
+nllh = sum(0.5*log(derivedSigmas.^2*2*pi)+...
+    0.5*(simVals.^2./derivedSigmas.^2));
+
+normlike([zeros(6000) derivedSigmas.^2], simVals)
+%%
+figure('Position', [50 50 1200 600])
+subplot(1, 2, 1)
+plot(simVals2, '-b')
+
+subplot(1, 2, 2)
+plot(simSigmas2)
+
 %%
 
-hist(simVals ./ derivedSigmas, 40)
+ToEstMdl = garch(1,1);
+%EstMdl = estimate(ToEstMdl, simVals)
+[EstMdl,EstParamCov,logL,info] = estimate(ToEstMdl, simVals)
 
 
+%% backtesting, overfitting
 
+alpha = 0.001;
+VaRHat = quantile(logRets{:, 2}, alpha);
 
+[alpha; sum(logRets{:, 2} < VaRHat)/size(logRets{:, 2}, 1)]
 
+%%
